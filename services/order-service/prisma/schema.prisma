@@ -17,24 +17,24 @@ enum OrderStatus {
 }
 
 model Order {
-  id          String      @id @default(uuid())
-  userId      String      @map("user_id")
-  status      OrderStatus @default(PENDING)
-  totalAmount Float       @map("total_amount")
-  createdAt   DateTime    @default(now()) @map("created_at")
-  updatedAt   DateTime    @updatedAt @map("updated_at")
-  items       OrderItem[]
+  id                 String      @id @default(uuid())
+  userId             String      @map("user_id")
+  status             OrderStatus @default(PENDING)
+  totalAmountInPaise Int         @map("total_amount_in_paise")
+  createdAt          DateTime    @default(now()) @map("created_at")
+  updatedAt          DateTime    @updatedAt @map("updated_at")
+  items              OrderItem[]
 
   @@map("orders")
 }
 
 model OrderItem {
-  id        String   @id @default(uuid())
-  orderId   String   @map("order_id")
-  productId String   @map("product_id")
-  quantity  Int
-  price     Float
-  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  id           String   @id @default(uuid())
+  orderId      String   @map("order_id")
+  productId    String   @map("product_id")
+  quantity     Int
+  priceInPaise Int      @map("price_in_paise")
+  order        Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@map("order_items")
 }

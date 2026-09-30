@@ -18,8 +18,15 @@ class ValidationError extends AppError {
   }
 }
 
+class InsufficientStockError extends AppError {
+  constructor(message = 'Insufficient stock available') {
+    super(message, 409, 'INSUFFICIENT_STOCK');
+  }
+}
+
 module.exports = {
   AppError,
   NotFoundError,
-  ValidationError
+  ValidationError,
+  InsufficientStockError
 };

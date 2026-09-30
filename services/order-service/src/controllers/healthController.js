@@ -1,5 +1,8 @@
 const { PrismaClient } = require('@prisma/client');
+const RabbitMQManager = require('../messaging/rabbitmq');
+
 const prisma = new PrismaClient();
+const rabbitmq = new RabbitMQManager('order-service');
 
 const getHealth = (req, res) => {
   return res.status(200).json({
@@ -9,19 +12,41 @@ const getHealth = (req, res) => {
 };
 
 const getHealthReady = async (req, res) => {
+  let dbStatus = 'DISCONNECTED';
+  let rmqStatus = 'DISCONNECTED';
+  let isReady = true;
+
   try {
     await prisma.$queryRaw`SELECT 1`;
+    dbStatus = 'CONNECTED';
+  } catch (error) {
+    isReady = false;
+  }
+
+  try {
+    const rmqConnected = await rabbitmq.checkHealth();
+    if (rmqConnected) {
+      rmqStatus = 'CONNECTED';
+    } else {
+      isReady = false;
+    }
+  } catch (error) {
+    isReady = false;
+  }
+
+  if (isReady) {
     return res.status(200).json({
       status: 'UP',
       service: 'order-service',
-      database: 'CONNECTED'
+      database: dbStatus,
+      rabbitmq: rmqStatus
     });
-  } catch (error) {
+  } else {
     return res.status(503).json({
       status: 'DOWN',
       service: 'order-service',
-      database: 'DISCONNECTED',
-      error: error.message
+      database: dbStatus,
+      rabbitmq: rmqStatus
     });
   }
 };

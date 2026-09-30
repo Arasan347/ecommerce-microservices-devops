@@ -5,8 +5,10 @@ const {
   getProductById,
   updateProduct,
   deleteProduct,
+  reserveStock,
   createProductSchema,
-  updateProductSchema
+  updateProductSchema,
+  reserveStockSchema
 } = require('../controllers/productController');
 const validate = require('../middleware/validate');
 
@@ -17,5 +19,6 @@ router.get('/', getProducts);
 router.get('/:id', getProductById);
 router.put('/:id', validate(updateProductSchema), updateProduct);
 router.delete('/:id', deleteProduct);
+router.post('/:id/reserve', validate(reserveStockSchema), reserveStock);
 
 module.exports = router;

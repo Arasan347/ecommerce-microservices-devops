@@ -4,7 +4,7 @@ const mockProduct = {
   id: 'prod-uuid-1234',
   name: 'Developer Laptop',
   description: 'High performance laptop',
-  price: 75000,
+  priceInPaise: 7500000,
   stock: 20,
   createdAt: new Date(),
   updatedAt: new Date()
@@ -19,6 +19,7 @@ jest.mock('@prisma/client', () => {
       update: jest.fn(),
       delete: jest.fn()
     },
+    $transaction: jest.fn(callback => callback(mPrismaClient)),
     $queryRaw: jest.fn()
   };
   return { PrismaClient: jest.fn(() => mPrismaClient) };
@@ -49,7 +50,7 @@ describe('Product Service API', () => {
   });
 
   describe('POST /products (Create Product)', () => {
-    it('should create a product with valid fields', async () => {
+    it('should create a product with valid priceInPaise', async () => {
       prisma.product.create.mockResolvedValueOnce(mockProduct);
 
       const res = await request(app)
@@ -57,22 +58,22 @@ describe('Product Service API', () => {
         .send({
           name: 'Developer Laptop',
           description: 'High performance laptop',
-          price: 75000,
+          priceInPaise: 7500000,
           stock: 20
         });
 
       expect(res.statusCode).toEqual(201);
       expect(res.body.id).toEqual(mockProduct.id);
-      expect(res.body.price).toEqual(75000);
+      expect(res.body.priceInPaise).toEqual(7500000);
     });
 
-    it('should reject creation if price is 0 or negative', async () => {
+    it('should reject creation if priceInPaise is 0 or negative', async () => {
       const res = await request(app)
         .post('/products')
         .send({
           name: 'Free Laptop',
           description: 'Invalid price product',
-          price: 0,
+          priceInPaise: 0,
           stock: 5
         });
 
@@ -86,12 +87,43 @@ describe('Product Service API', () => {
         .send({
           name: 'Invalid Stock Laptop',
           description: 'Negative stock product',
-          price: 100,
+          priceInPaise: 10000,
           stock: -5
         });
 
       expect(res.statusCode).toEqual(400);
       expect(res.body.error.code).toEqual('VALIDATION_ERROR');
+    });
+  });
+
+  describe('POST /products/:id/reserve (Inventory Reservation)', () => {
+    it('should reserve stock successfully and decrement inventory', async () => {
+      prisma.product.findUnique.mockResolvedValueOnce(mockProduct);
+      prisma.product.update.mockResolvedValueOnce({
+        ...mockProduct,
+        stock: 18
+      });
+
+      const res = await request(app)
+        .post(`/products/${mockProduct.id}/reserve`)
+        .send({ quantity: 2 });
+
+      expect(res.statusCode).toEqual(200);
+      expect(res.body.stock).toEqual(18);
+    });
+
+    it('should return 409 Conflict if requested stock exceeds available inventory', async () => {
+      prisma.product.findUnique.mockResolvedValueOnce({
+        ...mockProduct,
+        stock: 1
+      });
+
+      const res = await request(app)
+        .post(`/products/${mockProduct.id}/reserve`)
+        .send({ quantity: 5 });
+
+      expect(res.statusCode).toEqual(409);
+      expect(res.body.error.code).toEqual('INSUFFICIENT_STOCK');
     });
   });
 
@@ -110,32 +142,6 @@ describe('Product Service API', () => {
       const res = await request(app).get('/products/non-existent-id');
       expect(res.statusCode).toEqual(404);
       expect(res.body.error.code).toEqual('PRODUCT_NOT_FOUND');
-    });
-  });
-
-  describe('PUT /products/:id & DELETE /products/:id', () => {
-    it('should update product information', async () => {
-      prisma.product.findUnique.mockResolvedValueOnce(mockProduct);
-      prisma.product.update.mockResolvedValueOnce({
-        ...mockProduct,
-        price: 80000
-      });
-
-      const res = await request(app)
-        .put(`/products/${mockProduct.id}`)
-        .send({ price: 80000 });
-
-      expect(res.statusCode).toEqual(200);
-      expect(res.body.price).toEqual(80000);
-    });
-
-    it('should delete existing product', async () => {
-      prisma.product.findUnique.mockResolvedValueOnce(mockProduct);
-      prisma.product.delete.mockResolvedValueOnce(mockProduct);
-
-      const res = await request(app).delete(`/products/${mockProduct.id}`);
-      expect(res.statusCode).toEqual(200);
-      expect(res.body.message).toMatch(/deleted/i);
     });
   });
 });

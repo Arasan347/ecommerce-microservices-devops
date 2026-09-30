@@ -2,11 +2,20 @@ const { PrismaClient } = require('@prisma/client');
 const { z } = require('zod');
 const UserClient = require('../services/userClient');
 const ProductClient = require('../services/productClient');
+const RabbitMQManager = require('../messaging/rabbitmq');
 const { NotFoundError, InsufficientStockError, ValidationError } = require('../utils/errors');
 
 const prisma = new PrismaClient();
 const userClient = new UserClient();
 const productClient = new ProductClient();
+const rabbitmq = new RabbitMQManager('order-service');
+
+const VALID_TRANSITIONS = {
+  PENDING: ['CONFIRMED', 'CANCELLED'],
+  CONFIRMED: ['COMPLETED'],
+  CANCELLED: [],
+  COMPLETED: []
+};
 
 const createOrderSchema = z.object({
   items: z.array(
@@ -26,43 +35,36 @@ const updateStatusSchema = z.object({
 const createOrder = async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const { items } = req.body;
+    const { items } = createOrderSchema.parse(req.body);
 
     // Step 1: Verify User exists in User Service
     await userClient.getUserById(userId);
 
-    // Step 2 & 3: Verify each product, check inventory, and retrieve server-side price
-    let totalAmount = 0;
+    // Step 2 & 3: Reserve inventory and retrieve server-side priceInPaise for each item
+    let totalAmountInPaise = 0;
     const preparedItems = [];
 
     for (const item of items) {
-      const product = await productClient.getProductById(item.productId);
+      // reserveStock returns updated product containing priceInPaise
+      const product = await productClient.reserveStock(item.productId, item.quantity);
 
-      if (product.stock < item.quantity) {
-        throw new InsufficientStockError(
-          `Product ${product.name} (ID: ${product.id}) has insufficient stock. Available: ${product.stock}, requested: ${item.quantity}`
-        );
-      }
-
-      const itemTotal = product.price * item.quantity;
-      totalAmount += itemTotal;
+      const itemPriceInPaise = product.priceInPaise ?? Math.round((product.price || 0) * 100);
+      const itemTotalInPaise = itemPriceInPaise * item.quantity;
+      totalAmountInPaise += itemTotalInPaise;
 
       preparedItems.push({
         productId: product.id,
         quantity: item.quantity,
-        price: product.price
+        priceInPaise: itemPriceInPaise
       });
     }
 
-    // Round totalAmount to 2 decimal places
-    totalAmount = Math.round(totalAmount * 100) / 100;
-
-    // Step 4: Create Order and OrderItems in Order DB
+    // Step 4: Create Order in Order DB (Status: PENDING)
     const order = await prisma.order.create({
       data: {
         userId,
         status: 'PENDING',
-        totalAmount,
+        totalAmountInPaise,
         items: {
           create: preparedItems
         }
@@ -71,6 +73,19 @@ const createOrder = async (req, res, next) => {
         items: true
       }
     });
+
+    // Step 5: Publish OrderCreated event asynchronously to RabbitMQ
+    try {
+      const event = rabbitmq.createEvent('OrderCreated', {
+        orderId: order.id,
+        userId: order.userId,
+        totalAmountInPaise: order.totalAmountInPaise,
+        items: order.items
+      });
+      await rabbitmq.publish('order.created', event);
+    } catch (msgErr) {
+      console.warn('RabbitMQ publish failed for OrderCreated, order created in DB:', msgErr.message);
+    }
 
     return res.status(201).json(order);
   } catch (error) {
@@ -122,7 +137,7 @@ const getOrdersByUserId = async (req, res, next) => {
 const updateOrderStatus = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
+    const { status: targetStatus } = updateStatusSchema.parse(req.body);
 
     const existingOrder = await prisma.order.findUnique({
       where: { id }
@@ -132,9 +147,18 @@ const updateOrderStatus = async (req, res, next) => {
       throw new NotFoundError('Order not found');
     }
 
+    const currentStatus = existingOrder.status;
+    const allowedNextStatuses = VALID_TRANSITIONS[currentStatus] || [];
+
+    if (currentStatus !== targetStatus && !allowedNextStatuses.includes(targetStatus)) {
+      throw new ValidationError(
+        `Invalid status transition from ${currentStatus} to ${targetStatus}. Allowed transitions from ${currentStatus}: [${allowedNextStatuses.join(', ')}]`
+      );
+    }
+
     const updatedOrder = await prisma.order.update({
       where: { id },
-      data: { status },
+      data: { status: targetStatus },
       include: {
         items: true
       }

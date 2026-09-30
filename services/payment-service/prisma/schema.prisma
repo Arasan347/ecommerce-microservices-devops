@@ -1,0 +1,30 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+model Payment {
+  id                   String        @id @default(uuid())
+  orderId              String        @map("order_id")
+  userId               String        @map("user_id")
+  amountInPaise        Int           @map("amount_in_paise")
+  status               PaymentStatus @default(PENDING)
+  transactionReference String?       @map("transaction_reference")
+  eventId              String?       @unique @map("event_id")
+  createdAt            DateTime      @default(now()) @map("created_at")
+  updatedAt            DateTime      @updatedAt @map("updated_at")
+
+  @@map("payments")
+}

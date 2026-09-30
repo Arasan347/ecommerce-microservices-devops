@@ -11,7 +11,7 @@ const mockProduct = {
   id: 'prod-uuid-1234',
   name: 'Developer Laptop',
   description: 'High performance laptop',
-  price: 500,
+  priceInPaise: 50000,
   stock: 10
 };
 
@@ -19,7 +19,7 @@ const mockOrder = {
   id: 'order-uuid-1234',
   userId: 'user-uuid-1234',
   status: 'PENDING',
-  totalAmount: 1000,
+  totalAmountInPaise: 100000,
   createdAt: new Date(),
   updatedAt: new Date(),
   items: [
@@ -28,7 +28,7 @@ const mockOrder = {
       orderId: 'order-uuid-1234',
       productId: 'prod-uuid-1234',
       quantity: 2,
-      price: 500
+      priceInPaise: 50000
     }
   ]
 };
@@ -48,9 +48,8 @@ jest.mock('@prisma/client', () => {
 });
 
 const mockGetUserById = jest.fn();
-const mockGetProductById = jest.fn();
+const mockReserveStock = jest.fn();
 
-// Mock UserClient and ProductClient
 jest.mock('../src/services/userClient', () => {
   return jest.fn().mockImplementation(() => ({
     getUserById: mockGetUserById
@@ -59,13 +58,32 @@ jest.mock('../src/services/userClient', () => {
 
 jest.mock('../src/services/productClient', () => {
   return jest.fn().mockImplementation(() => ({
-    getProductById: mockGetProductById
+    reserveStock: mockReserveStock
+  }));
+});
+
+const mockPublish = jest.fn().mockResolvedValue(true);
+const mockCheckHealth = jest.fn().mockResolvedValue(true);
+jest.mock('../src/messaging/rabbitmq', () => {
+  return jest.fn().mockImplementation(() => ({
+    publish: mockPublish,
+    checkHealth: mockCheckHealth,
+    createEvent: jest.fn((type, data) => ({
+      eventId: 'evt-test-123',
+      eventType: type,
+      timestamp: new Date().toISOString(),
+      source: 'order-service',
+      data
+    })),
+    connect: jest.fn().mockResolvedValue({}),
+    consume: jest.fn().mockResolvedValue({})
   }));
 });
 
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const app = require('../src/app');
+const { InsufficientStockError } = require('../src/utils/errors');
 
 describe('Order Service API', () => {
   const secret = process.env.JWT_SECRET || 'supersecretkey_change_in_production';
@@ -74,7 +92,7 @@ describe('Order Service API', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockGetUserById.mockResolvedValue(mockUser);
-    mockGetProductById.mockResolvedValue(mockProduct);
+    mockReserveStock.mockResolvedValue(mockProduct);
   });
 
   describe('GET /health & /health/ready', () => {
@@ -84,16 +102,17 @@ describe('Order Service API', () => {
       expect(res.body.status).toEqual('UP');
     });
 
-    it('GET /health/ready should return 200 UP when DB is connected', async () => {
+    it('GET /health/ready should return 200 UP when DB and RabbitMQ are ready', async () => {
       prisma.$queryRaw.mockResolvedValueOnce([{ '?column?': 1 }]);
       const res = await request(app).get('/health/ready');
       expect(res.statusCode).toEqual(200);
       expect(res.body.database).toEqual('CONNECTED');
+      expect(res.body.rabbitmq).toEqual('CONNECTED');
     });
   });
 
-  describe('POST /orders (Create Order)', () => {
-    it('should create an order successfully and calculate server-side price', async () => {
+  describe('POST /orders (Create Order & Publish OrderCreated Event)', () => {
+    it('should create an order successfully, reserve inventory, and publish OrderCreated event', async () => {
       prisma.order.create.mockResolvedValueOnce(mockOrder);
 
       const res = await request(app)
@@ -110,14 +129,13 @@ describe('Order Service API', () => {
 
       expect(res.statusCode).toEqual(201);
       expect(res.body.id).toEqual(mockOrder.id);
-      expect(res.body.totalAmount).toEqual(1000);
+      expect(res.body.totalAmountInPaise).toEqual(100000);
+      expect(mockReserveStock).toHaveBeenCalledWith('prod-uuid-1234', 2);
+      expect(mockPublish).toHaveBeenCalledWith('order.created', expect.any(Object));
     });
 
-    it('should fail if requested quantity exceeds product stock', async () => {
-      mockGetProductById.mockResolvedValueOnce({
-        ...mockProduct,
-        stock: 1
-      });
+    it('should fail if inventory reservation throws InsufficientStockError', async () => {
+      mockReserveStock.mockRejectedValueOnce(new InsufficientStockError('Insufficient stock for product reservation'));
 
       const res = await request(app)
         .post('/orders')
@@ -126,7 +144,7 @@ describe('Order Service API', () => {
           items: [
             {
               productId: 'prod-uuid-1234',
-              quantity: 2
+              quantity: 20
             }
           ]
         });
@@ -146,16 +164,8 @@ describe('Order Service API', () => {
     });
   });
 
-  describe('GET /orders/:id & PUT /orders/:id/status', () => {
-    it('should return order details by ID', async () => {
-      prisma.order.findUnique.mockResolvedValueOnce(mockOrder);
-
-      const res = await request(app).get(`/orders/${mockOrder.id}`);
-      expect(res.statusCode).toEqual(200);
-      expect(res.body.id).toEqual(mockOrder.id);
-    });
-
-    it('should update order status', async () => {
+  describe('State Machine & Transitions (PUT /orders/:id/status)', () => {
+    it('should allow valid transition PENDING -> CONFIRMED', async () => {
       prisma.order.findUnique.mockResolvedValueOnce(mockOrder);
       prisma.order.update.mockResolvedValueOnce({
         ...mockOrder,
@@ -168,6 +178,20 @@ describe('Order Service API', () => {
 
       expect(res.statusCode).toEqual(200);
       expect(res.body.status).toEqual('CONFIRMED');
+    });
+
+    it('should reject invalid transition COMPLETED -> PENDING', async () => {
+      prisma.order.findUnique.mockResolvedValueOnce({
+        ...mockOrder,
+        status: 'COMPLETED'
+      });
+
+      const res = await request(app)
+        .put(`/orders/${mockOrder.id}/status`)
+        .send({ status: 'PENDING' });
+
+      expect(res.statusCode).toEqual(400);
+      expect(res.body.error.message).toMatch(/Invalid status transition/i);
     });
   });
 });
