@@ -1,0 +1,9 @@
+node_modules/
+.env
+.env.local
+*.log
+coverage/
+dist/
+build/
+.DS_Store
+*.seed
