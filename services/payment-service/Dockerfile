@@ -31,4 +31,4 @@ USER node
 
 EXPOSE 3004
 
-CMD ["node", "src/server.js"]
+CMD ["sh", "-c", "npx prisma migrate deploy && node src/server.js"]
