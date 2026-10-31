@@ -48,3 +48,28 @@ jobs:
 
       - name: Run tests
         run: npm test -- --forceExit
+  
+  build:
+    name: Build ${{ matrix.service }} image
+    runs-on: ubuntu-latest
+    needs: test
+
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - user-service
+          - product-service
+          - order-service
+          - payment-service
+          - notification-service
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t ecommerce/${{ matrix.service }}:${{ github.sha }} \
+            ./services/${{ matrix.service }}
