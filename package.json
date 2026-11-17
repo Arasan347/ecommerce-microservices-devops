@@ -1,5 +1,13 @@
 {
+  "name": "ecommerce-devops",
+  "version": "1.0.0",
+  "scripts": {
+    "test:integration": "jest tests/week2_integration.test.js --testPathIgnorePatterns=\"services\" --runInBand --forceExit"
+  },
   "dependencies": {
     "amqplib": "^2.2.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
   }
 }

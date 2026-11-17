@@ -95,20 +95,18 @@ describe('Week 2 Architecture: End-to-End & Failure Scenarios', () => {
       };
 
       // Mock prisma for Payment Service
+      const mockPaymentRecord = {
+        id: 'pay-exist-1',
+        eventId: 'evt-dup-1001',
+        orderId: 'order-dup-1',
+        status: 'SUCCESS'
+      };
+
       const mockPaymentPrisma = {
         payment: {
-          findUnique: jest.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({
-            id: 'pay-exist-1',
-            eventId: 'evt-dup-1001',
-            orderId: 'order-dup-1'
-          }),
+          findUnique: jest.fn().mockResolvedValue(mockPaymentRecord),
           findFirst: jest.fn().mockResolvedValue(null),
-          create: jest.fn().mockResolvedValue({
-            id: 'pay-exist-1',
-            eventId: 'evt-dup-1001',
-            orderId: 'order-dup-1',
-            status: 'SUCCESS'
-          })
+          create: jest.fn().mockResolvedValue(mockPaymentRecord)
         }
       };
 
