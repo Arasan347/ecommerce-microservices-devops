@@ -157,7 +157,7 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam://${{ env.AWS_ACCOUNT_ID }}:role/GitHubActionsECRPushRole
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/GitHubActionsECRPushRole
           role-session-name: GitHubActions-${{ matrix.service }}-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
 
