@@ -82,7 +82,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U postgres -d ecommerce"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -121,8 +121,8 @@ jobs:
 
       - name: Install service dependencies and generate Prisma clients
         run: |
-          cd services/payment-service && npm ci && npx prisma generate
-          cd ../notification-service && npm ci && npx prisma generate
+          (cd services/payment-service && npm ci && npx prisma generate)
+          (cd services/notification-service && npm ci && npx prisma generate)
 
       - name: Run root integration tests
         run: npm run test:integration
